@@ -166,3 +166,4 @@ https://huggingface.co/spaces/Veronyka/radar-legislativo-lgbtqia
 
 **Use como ferramenta de apoio, sempre com revisão humana.** ⚖️
 
+

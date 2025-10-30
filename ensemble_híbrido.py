@@ -94,7 +94,16 @@ PADROES_ALTA_PRIORIDADE = [
     # PL 906: Impede menores em eventos LGBTQIA+ (verbos E substantivos)
     r"(impede|proíbe|veda|proibição|vedação).*(presença|participação|acesso).*(menor|menores|criança|crianças).*(em|em eventos|nos eventos|de eventos|em paradas).*(da|da comunidade|lgbtqia|lgbt|comunidade|diversidade)",
     r"(impede|proíbe|veda|proibição).*(menor|menores|criança|crianças).*(evento|parada|manifestação|atividade).*(lgbtqia|lgbt|comunidade)",
-    r"proibição.*(presença|da presença).*(menor|menores|criança|crianças).*(em|nos|de).*evento.*(da|da comunidade|lgbtqia|lgbt|comunidade)"
+    r"proibição.*(presença|da presença).*(menor|menores|criança|crianças).*(em|nos|de).*evento.*(da|da comunidade|lgbtqia|lgbt|comunidade)",
+    
+    # PL 198/2023: Proibir linguagem neutra (NOVO)
+    r"(proíbe|proibir|veda|vedar|proibição|vedação).*(linguagem|uso|utilização).*(neutr|neutro|neutra)",
+    r"(proíbe|proibir|veda|vedar|proibição|vedação).*(linguagem neutra|pronome neutr|pronomes neutr)",
+    
+    # PL 269/2023: Proibição de bloqueio puberal, cirurgias de redesignação (NOVO)
+    r"(proíbe|proibir|veda|vedar|proibição|vedação).*(bloqueio puberal|puberdade|hormônio|hormonal|cirurgia).*(trans|redesignação|transexual|transgênero|menor|menores|adolescent)",
+    r"(proíbe|proibir|proibição).*(terapia hormonal|cirurgia.*redesignação|redesignação sexual).*(menor|menores|criança)",
+    r"(proíbe|proibir|proibição).*(bloqueio.*puberal|hormonal).*processo transexualizador"
 ]
 
 # Padrões normais (menos específicos, mas ainda importantes)
@@ -106,7 +115,9 @@ PADROES_RESTRITIVOS = [
     r"(restringe|limita|restrição).*participação.*(sexo|gênero)",
     r"define.*entidade.*(homem|mulher)",  # "Define entidade familiar como união entre homem e mulher"
     r"(proíbe|proibição|impede|veda).*menor.*(evento|parada)",  # Proíbe menores em eventos (genérico)
-    r"(proíbe|veda|proibição).*símbolo.*(religioso|parada|lgbt)"  # Proíbe símbolos em paradas (genérico)
+    r"(proíbe|veda|proibição).*símbolo.*(religioso|parada|lgbt)",  # Proíbe símbolos em paradas (genérico)
+    r"(proíbe|proibição).*linguagem",  # Proíbe linguagem (genérico - pode pegar neutra)
+    r"(proíbe|proibição).*(bloqueio|hormônio|cirurgia).*(menor|adolescent)"  # Restrições médicas para menores trans
 ]
 
 def carregar_modelos():
@@ -175,6 +186,12 @@ def extrair_keywords(texto: str) -> Tuple[int, int]:
     
     desfavoraveis = sum(1 for kw in KEYWORDS_DESFAVORAVEIS 
                         if re.search(kw, texto_lower, re.IGNORECASE))
+    
+    # EXCEÇÃO: "Criminaliza terapias de conversão" é favorável, não desfavorável
+    # Se tem "criminaliza" + "terapia de conversão", reduzir contagem desfavorável
+    if re.search(r'criminaliza.*terapia.*conversão', texto_lower, re.IGNORECASE):
+        desfavoraveis = max(0, desfavoraveis - 1)  # Remover "terapia de conversão" da contagem desfavorável
+        favoraveis += 1  # Adicionar como favorável
     
     return favoraveis, desfavoraveis
 
