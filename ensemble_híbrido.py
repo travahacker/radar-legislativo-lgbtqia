@@ -125,15 +125,44 @@ def carregar_modelos():
         radar = None
     
     try:
+        # AzMina não tem tokenizer_config.json no repositório, então usamos o tokenizer do modelo base
+        # Conforme README do modelo: base_model = neuralmind/bert-base-portuguese-cased
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+        
+        # Modelo base conforme documentado no README do repositório AzMina
+        base_model = "neuralmind/bert-base-portuguese-cased"
+        
+        print("   🔧 Carregando AzMina com tokenizer do modelo base...")
+        # Carregar tokenizer do modelo base (mesmo usado no treinamento do AzMina)
+        tokenizer = AutoTokenizer.from_pretrained(base_model)
+        # Carregar apenas o modelo AzMina (fine-tuned)
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_AZMINA)
+        
+        # Criar pipeline combinando modelo AzMina + tokenizer do modelo base
+        # Isso é seguro porque o AzMina foi treinado com esse tokenizer específico
         azmina = pipeline(
             "text-classification",
-            model=MODEL_AZMINA,
+            model=model,
+            tokenizer=tokenizer,
             device=-1  # CPU
         )
         print("   ✅ AzMina carregado")
     except Exception as e:
-        print(f"   ⚠️ Erro ao carregar AzMina: {e}")
-        azmina = None
+        error_msg = str(e)
+        print(f"   ⚠️ Erro ao carregar AzMina: {error_msg[:150]}")
+        print("   ℹ️ Tentando método alternativo (pipeline direto)...")
+        try:
+            # Fallback: tentar pipeline direto (provavelmente falhará, mas tentamos)
+            azmina = pipeline(
+                "text-classification",
+                model=MODEL_AZMINA,
+                device=-1
+            )
+            print("   ✅ AzMina carregado (método alternativo)")
+        except Exception as e2:
+            print(f"   ❌ AzMina não pôde ser carregado: {str(e2)[:100]}")
+            print("   ⚠️ Sistema funcionará apenas com Radar Social + Keywords + Padrões")
+            azmina = None
     
     return radar, azmina
 
@@ -190,12 +219,23 @@ def classificar_ensemble(
     
     if pesos is None:
         # Pesos ajustados: dar mais peso a keywords e padrões (mais específicos para legislação)
-        pesos = {
-            'radar': 0.20,      # Detecção de ódio (menos relevante em legislação)
-            'azmina': 0.15,     # Perspectiva feminista (proxy, não ideal) - REDUZIDO
-            'keywords': 0.35,   # Keywords específicas (MAIS IMPORTANTE - legislação tem termos claros)
-            'padroes': 0.30     # Padrões legislativos (CRÍTICO para detectar restrições) - AUMENTADO
-        }
+        # Se AzMina não estiver disponível, redistribuir seu peso proporcionalmente
+        if azmina_model is None:
+            # Sem AzMina: aumentar peso de keywords e padrões proporcionalmente
+            pesos = {
+                'radar': 0.20,      # Detecção de ódio
+                'azmina': 0.0,      # AzMina não disponível
+                'keywords': 0.40,    # Aumentado de 0.35 para 0.40 (+0.05 do AzMina)
+                'padroes': 0.40     # Aumentado de 0.30 para 0.40 (+0.10 do AzMina)
+            }
+        else:
+            # Com ambos os modelos: distribuição otimizada
+            pesos = {
+                'radar': 0.20,      # Detecção de ódio (menos relevante em legislação)
+                'azmina': 0.15,     # Perspectiva feminista (proxy, não ideal) - REDUZIDO
+                'keywords': 0.35,   # Keywords específicas (MAIS IMPORTANTE - legislação tem termos claros)
+                'padroes': 0.30     # Padrões legislativos (CRÍTICO para detectar restrições) - AUMENTADO
+            }
     
     resultados = {}
     

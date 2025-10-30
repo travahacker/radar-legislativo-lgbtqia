@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import re
 import time
+import xml.etree.ElementTree as ET
+import zipfile
+from io import BytesIO
 
 # URLs das APIs
 API_CAMARA = "https://dadosabertos.camara.leg.br/api/v2"
@@ -19,6 +22,7 @@ API_ALESP = None  # Verificar se há API pública
 # Termos para filtrar PLs relacionadas a LGBTQIA+
 # TERMOS ESPECÍFICOS primeiro (mais relevantes)
 TERMOS_BUSCA_ESPECIFICOS = [
+    # Termos básicos
     "lgbt",
     "lgbtqia",
     "lgbtqia+",
@@ -29,10 +33,29 @@ TERMOS_BUSCA_ESPECIFICOS = [
     "homofobia",
     "transfobia",
     "homossexual",
+    
+    # Identidade e orientação
     "identidade de gênero",
     "orientação sexual",
     "diversidade sexual",
+    "bissexual",
+    "pansexual",
+    "não-binário",
+    "não binário",
+    "cisgênero",
+    
+    # Direitos e procedimentos
     "nome social",
+    "casamento igualitário",
+    "união homoafetiva",
+    "adoção homoafetiva",
+    "mudança de nome",
+    "retificação de registro",
+    
+    # Discriminação e violência
+    "discriminação sexual",
+    "preconceito sexual",
+    "criminalização da homofobia",
     "terapia de conversão",
     "cura gay",
     "reparação sexual"
@@ -51,7 +74,11 @@ TERMOS_BUSCA_CONTEXTUAIS = [
     "lules",
     "símbolos religiosos.*parada",
     "menor.*evento.*lgbt",
-    "comunidade lgbt"
+    "comunidade lgbt",
+    "sexo biológico",
+    "gênero biológico",
+    "família tradicional",
+    "masculino e feminino"
 ]
 
 TERMOS_BUSCA = TERMOS_BUSCA_ESPECIFICOS + TERMOS_BUSCA_CONTEXTUAIS
@@ -249,7 +276,10 @@ def buscar_senado_federal(
     Busca PLs no Senado Federal
     
     API: https://legis.senado.leg.br/dadosabertos
-    Nota: API do Senado é mais complexa, esta é uma implementação básica que busca PLS por ano
+    Endpoint: /materia/pesquisa/lista
+    
+    ✅ Este endpoint permite buscar matérias por ano de apresentação, resolvendo 
+    o problema de lacunas em dados históricos.
     """
     if termos is None:
         termos = TERMOS_BUSCA
@@ -257,167 +287,412 @@ def buscar_senado_federal(
     # Determinar anos para buscar
     ano_atual = datetime.now().year
     if ano_inicio_manual is not None and ano_fim_manual is not None:
-        anos_para_buscar = [ano_inicio_manual] if ano_inicio_manual == ano_fim_manual else list(range(ano_inicio_manual, ano_fim_manual + 1))
+        anos_para_buscar = list(range(ano_inicio_manual, ano_fim_manual + 1))
     else:
         anos_para_buscar = [ano_atual]
     
     pls_encontradas = []
     
-    # API do Senado Federal
-    # Endpoint: /dadosabertos/materia/atualizadas
-    # Retorna matérias atualizadas com ementa completa
-    # Estrutura: ListaMateriasAtualizadas -> Materias -> Materia[] -> DadosBasicosMateria.EmentaMateria
-    # Documentação: https://legis.senado.leg.br/dadosabertos/api-docs/swagger-ui/index.html
+    # API do Senado Federal - endpoint /materia/pesquisa/lista
+    url_base = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
     
-    print(f"   📥 Buscando matérias atualizadas no Senado...")
-    
-    url_base = "https://legis.senado.leg.br/dadosabertos/materia/atualizadas"
+    print(f"   📥 Buscando no Senado (anos {min(anos_para_buscar)}-{max(anos_para_buscar)})...")
     
     try:
-        headers = {"Accept": "application/json"}
-        response = requests.get(url_base, headers=headers, timeout=20)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        if 'ListaMateriasAtualizadas' not in data:
-            print(f"   ⚠️ Estrutura de resposta inesperada do Senado")
-            return []
-        
-        lista = data['ListaMateriasAtualizadas']
-        materias_data = lista.get('Materias', {})
-        
-        if isinstance(materias_data, dict) and 'Materia' in materias_data:
-            materias_list = materias_data['Materia']
-            materias_list = materias_list if isinstance(materias_list, list) else [materias_list]
-        elif isinstance(materias_data, list):
-            materias_list = materias_data
-        else:
-            materias_list = []
-        
-        if not materias_list:
-            print(f"   ℹ️ Nenhuma matéria encontrada no Senado")
-            return []
-        
-        print(f"   📊 Total de matérias atualizadas: {len(materias_list)} (antes do filtro)")
-        
-        # Filtrar por ano e termos LGBTQIA+
-        for materia in materias_list:
+        for ano in reversed(anos_para_buscar):
             if len(pls_encontradas) >= limite:
                 break
             
-            # Extrair informações
-            ident = materia.get('IdentificacaoMateria', {})
-            dados = materia.get('DadosBasicosMateria', {})
-            
-            ano_materia = ident.get('AnoMateria', '')
-            sigla = ident.get('SiglaSubtipoMateria', '')
-            numero = ident.get('NumeroMateria', '')
-            codigo = ident.get('CodigoMateria', '')
-            
-            # Filtrar por ano se especificado
-            if ano_inicio_manual is not None and ano_fim_manual is not None:
-                try:
-                    ano_int = int(ano_materia) if ano_materia else 0
-                    if not (ano_inicio_manual <= ano_int <= ano_fim_manual):
-                        continue
-                except:
+            try:
+                # Buscar todas as matérias apresentadas no ano especificado
+                params = {'ano': str(ano)}
+                
+                response = requests.get(url_base, params=params, headers={'Accept': 'application/json'}, timeout=30)
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                if 'PesquisaBasicaMateria' not in data:
+                    print(f"   ℹ️ Resposta inesperada do Senado em {ano}")
                     continue
-            
-            # Filtrar apenas PLS (ou outras siglas de projeto de lei)
-            if sigla not in ['PLS', 'PLC', 'PL']:
-                continue
-            
-            # Obter ementa
-            ementa = dados.get('EmentaMateria', '')
-            if not ementa or len(ementa) < 10:
-                continue
-            
-            ementa_lower = ementa.lower()
-            
-            # Filtrar por termos LGBTQIA+ (mesma lógica da Câmara)
-            tem_termo_especifico = False
-            for termo in TERMOS_BUSCA_ESPECIFICOS:
-                if termo == 'trans' and 'trans' in ementa_lower:
-                    if re.search(r'\btrans\b', ementa_lower) and (
-                        any(palavra in ementa_lower for palavra in ['gênero', 'sexual', 'identidade', 'lgbt', 'transfobia', 'transexual', 'transgênero']) or
-                        any(palavra in ementa_lower for palavra in ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 'direito', 'direitos'])
-                    ):
-                        tem_termo_especifico = True
+                
+                materias_data = data['PesquisaBasicaMateria'].get('Materias', {})
+                
+                if isinstance(materias_data, dict) and 'Materia' in materias_data:
+                    materias = materias_data['Materia']
+                    materias = materias if isinstance(materias, list) else [materias]
+                elif isinstance(materias_data, list):
+                    materias = materias_data
+                else:
+                    materias = []
+                
+                if not materias:
+                    print(f"   ℹ️ Nenhuma matéria encontrada no Senado em {ano}")
+                    continue
+                
+                print(f"   📊 Senado {ano}: {len(materias)} matérias (antes do filtro)")
+                
+                # Processar cada matéria
+                materias_ano = 0
+                for materia in materias:
+                    if len(pls_encontradas) >= limite:
                         break
-                elif termo.lower() in ementa_lower:
-                    tem_termo_especifico = True
-                    break
-            
-            palavras_legislativas = ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 
-                                    'orientação', 'identidade', 'gênero', 'sexual', 'direito', 'direitos',
-                                    'dispõe', 'altera', 'estabelece', 'define']
-            tem_termo_contextual = any(
-                termo.lower() in ementa_lower 
-                for termo in TERMOS_BUSCA_CONTEXTUAIS[:8]
-            ) and any(
-                palavra in ementa_lower for palavra in palavras_legislativas
-            )
-            
-            if tem_termo_especifico or tem_termo_contextual:
-                autor = 'N/A'
-                if 'AutoresPrincipais' in materia:
-                    autor_data = materia.get('AutoresPrincipais', {})
-                    if isinstance(autor_data, dict) and 'AutorPrincipal' in autor_data:
-                        autor_obj = autor_data['AutorPrincipal']
-                        if isinstance(autor_obj, dict):
-                            autor = autor_obj.get('NomeAutor', 'N/A')
+                    
+                    try:
+                        # Extrair informações da matéria (estrutura simplificada da API /pesquisa/lista)
+                        sigla = materia.get('Sigla', '')
+                        numero = materia.get('Numero', '')
+                        ano_materia = materia.get('Ano', '')
+                        codigo = materia.get('Codigo', '')
+                        ementa = materia.get('Ementa', '')
+                        autor = materia.get('Autor', 'N/A')
+                        data = materia.get('Data', 'N/A')
+                        
+                        # Filtrar apenas Projetos de Lei (PL, PLS, PLC, PLP)
+                        if sigla not in ['PLS', 'PLC', 'PL', 'PLP']:
+                            continue
+                        
+                        if not ementa or len(ementa) < 10:
+                            continue
+                        
+                        ementa_lower = ementa.lower()
+                        
+                        # Filtrar por termos LGBTQIA+ (mesma lógica das outras fontes)
+                        tem_termo_especifico = False
+                        for termo in TERMOS_BUSCA_ESPECIFICOS:
+                            if termo == 'trans' and 'trans' in ementa_lower:
+                                if re.search(r'\btrans\b', ementa_lower) and (
+                                    any(p in ementa_lower for p in ['gênero', 'sexual', 'identidade', 'lgbt', 'transfobia', 'transexual', 'transgênero']) or
+                                    any(p in ementa_lower for p in ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 'direito', 'direitos'])
+                                ):
+                                    tem_termo_especifico = True
+                                    break
+                            elif termo.lower() in ementa_lower:
+                                tem_termo_especifico = True
+                                break
+                        
+                        palavras_legislativas = ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 
+                                                'orientação', 'identidade', 'gênero', 'sexual', 'direito', 'direitos',
+                                                'dispõe', 'altera', 'estabelece', 'define']
+                        tem_termo_contextual = any(
+                            termo.lower() in ementa_lower 
+                            for termo in TERMOS_BUSCA_CONTEXTUAIS[:8]
+                        ) and any(
+                            palavra in ementa_lower for palavra in palavras_legislativas
+                        )
+                        
+                        if tem_termo_especifico or tem_termo_contextual:
+                            # Construir link para matéria
+                            link = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo}" if codigo else "https://www25.senado.leg.br/web/atividade/materias"
+                            
+                            pls_encontradas.append({
+                                'Nº': f"{sigla} {numero}/{ano_materia}",
+                                'Ano': str(ano_materia),
+                                'Casa': 'Senado',
+                                'Ementa': ementa,
+                                'Autores': autor,
+                                'Data': data[:10] if isinstance(data, str) and len(data) >= 10 else str(data),
+                                'Link': link,
+                                'Status': materia.get('DescricaoIdentificacao', 'N/A'),
+                                'Fonte': 'Senado Federal'
+                            })
+                            
+                            materias_ano += 1
+                    
+                    except Exception as e:
+                        # Pular matéria se houver erro no parse
+                        continue
                 
-                data_apresentacao = dados.get('DataApresentacao', 'N/A')
+                if materias_ano > 0:
+                    print(f"   ✅ Senado {ano}: {materias_ano} PLs relevantes")
                 
-                link = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo}" if codigo else f"https://www25.senado.leg.br/web/atividade/materias"
-                
-                pls_encontradas.append({
-                    'Nº': f"{sigla} {numero}/{ano_materia}",
-                    'Ano': str(ano_materia),
-                    'Casa': 'Senado',
-                    'Ementa': ementa,
-                    'Autores': autor,
-                    'Data': data_apresentacao,
-                    'Link': link,
-                    'Status': ident.get('DescricaoIdentificacaoMateria', 'N/A'),
-                    'Fonte': 'Senado Federal'
-                })
+            except requests.exceptions.HTTPError as e:
+                print(f"   ⚠️ Erro HTTP no Senado ({ano}): {e.response.status_code}")
+                continue
+            except Exception as e:
+                print(f"   ⚠️ Erro no Senado ({ano}): {str(e)[:80]}")
+                continue
         
-        print(f"   ✅ {len(pls_encontradas)} PLs relevantes encontradas no Senado")
-        
+        print(f"   📊 Total Senado: {len(pls_encontradas)} PLs")
         return pls_encontradas[:limite]
         
-    except requests.exceptions.HTTPError as e:
-        print(f"   ⚠️ Erro HTTP ao buscar no Senado: {e.response.status_code}")
-        return []
     except Exception as e:
-        print(f"   ⚠️ Erro ao buscar no Senado: {str(e)[:100]}")
+        print(f"   ⚠️ Erro geral ao buscar no Senado: {str(e)[:100]}")
         return []
 
 def buscar_camara_sao_paulo(
     termos: List[str] = None,
+    ano_inicio_manual: Optional[int] = None,
+    ano_fim_manual: Optional[int] = None,
     limite: int = 50
 ) -> List[Dict]:
     """
     Busca PLs na Câmara Municipal de São Paulo
     
-    Nota: Pode não ter API pública - implementação futura via scraping
+    Web Service: https://splegisws.saopaulo.sp.leg.br/ws/ws2.asmx
+    Método: ProjetosPorAnoJSON
+    Portal de Dados Abertos: https://www.saopaulo.sp.leg.br/transparencia/dados-abertos/dados-disponibilizados-em-formato-aberto/
     """
-    print("⚠️ Busca na Câmara Municipal de SP ainda não implementada")
-    return []
+    if termos is None:
+        termos = TERMOS_BUSCA
+    
+    print(f"📥 Buscando projetos na Câmara Municipal de SP...")
+    
+    # URL do web service
+    base_url = "https://splegisws.saopaulo.sp.leg.br/ws/ws2.asmx/ProjetosPorAnoJSON"
+    
+    pls_encontradas = []
+    
+    # Determinar anos para buscar
+    ano_atual = datetime.now().year
+    
+    if ano_inicio_manual is not None and ano_fim_manual is not None:
+        anos_para_buscar = list(range(ano_inicio_manual, ano_fim_manual + 1))
+    else:
+        # Padrão: ano atual
+        anos_para_buscar = [ano_atual]
+    
+    try:
+        # Buscar projetos por ano
+        for ano in reversed(anos_para_buscar):
+            if len(pls_encontradas) >= limite:
+                break
+            
+            print(f"   📅 Buscando projetos de {ano}...")
+            
+            try:
+                # Chamar web service
+                params = {'Ano': ano}
+                response = requests.get(base_url, params=params, timeout=30)
+                response.raise_for_status()
+                
+                projetos = response.json()
+                if not isinstance(projetos, list):
+                    print(f"   ⚠️ Resposta não é lista: {type(projetos)}")
+                    continue
+                
+                print(f"   📊 {len(projetos)} projetos encontrados em {ano} (antes do filtro)")
+                
+                # Filtrar por termos LGBTQIA+
+                for projeto in projetos:
+                    if len(pls_encontradas) >= limite:
+                        break
+                    
+                    ementa = projeto.get('ementa', '')
+                    if not ementa or len(ementa) < 10:
+                        continue
+                    
+                    ementa_lower = ementa.lower()
+                    
+                    # Filtrar por termos específicos primeiro
+                    tem_termo_especifico = False
+                    for termo in TERMOS_BUSCA_ESPECIFICOS:
+                        if termo == 'trans' and 'trans' in ementa_lower:
+                            if re.search(r'\btrans\b', ementa_lower) and (
+                                any(palavra in ementa_lower for palavra in ['gênero', 'sexual', 'identidade', 'lgbt', 'transfobia', 'transexual', 'transgênero']) or
+                                any(palavra in ementa_lower for palavra in ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 'direito', 'direitos'])
+                            ):
+                                tem_termo_especifico = True
+                                break
+                        elif termo.lower() in ementa_lower:
+                            tem_termo_especifico = True
+                            break
+                    
+                    # Verificar termos contextuais
+                    palavras_legislativas = ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 
+                                            'orientação', 'identidade', 'gênero', 'sexual', 'direito', 'direitos',
+                                            'dispõe', 'altera', 'estabelece', 'define']
+                    tem_termo_contextual = any(
+                        termo.lower() in ementa_lower 
+                        for termo in TERMOS_BUSCA_CONTEXTUAIS[:8]
+                    ) and any(
+                        palavra in ementa_lower for palavra in palavras_legislativas
+                    )
+                    
+                    if tem_termo_especifico or tem_termo_contextual:
+                        tipo = projeto.get('tipo', 'PL')
+                        numero = projeto.get('numero', 'N/A')
+                        ano_projeto = projeto.get('ano', 'N/A')
+                        data_projeto = projeto.get('data', 'N/A')
+                        chave = projeto.get('chave', '')
+                        
+                        # Construir link (baseado na estrutura comum da Câmara SP)
+                        link = f"https://www.saopaulo.sp.leg.br/vereadores/projetos-de-lei/?projeto={chave}" if chave else f"https://www.saopaulo.sp.leg.br/"
+                        
+                        pls_encontradas.append({
+                            'Nº': f"{tipo} {numero}/{ano_projeto}",
+                            'Ano': str(ano_projeto),
+                            'Casa': 'Câmara Municipal SP',
+                            'Ementa': ementa,
+                            'Autores': 'N/A',  # Pode obter via ProjetosAutoresJSON se necessário
+                            'Data': data_projeto[:10] if isinstance(data_projeto, str) and len(data_projeto) >= 10 else str(data_projeto),
+                            'Link': link,
+                            'Status': 'N/A',
+                            'Fonte': 'Câmara Municipal de São Paulo'
+                        })
+                
+                if pls_encontradas:
+                    print(f"   ✅ {len(pls_encontradas)} projetos relevantes encontrados em {ano}")
+                    
+            except requests.exceptions.HTTPError as e:
+                print(f"   ⚠️ Erro HTTP ao buscar projetos de {ano}: {e.response.status_code}")
+                continue
+            except Exception as e:
+                print(f"   ⚠️ Erro ao buscar projetos de {ano}: {str(e)[:100]}")
+                continue
+        
+        print(f"   ✅ Total: {len(pls_encontradas)} projetos relevantes encontrados na Câmara Municipal SP")
+        
+        return pls_encontradas[:limite]
+        
+    except Exception as e:
+        print(f"   ⚠️ Erro geral ao buscar na Câmara Municipal SP: {str(e)[:150]}")
+        return []
 
 def buscar_alesp(
     termos: List[str] = None,
+    ano_inicio_manual: Optional[int] = None,
+    ano_fim_manual: Optional[int] = None,
     limite: int = 50
 ) -> List[Dict]:
     """
-    Busca PLs na ALESP
+    Busca PLs na ALESP (Assembleia Legislativa de São Paulo)
     
-    Nota: Pode não ter API pública - implementação futura via scraping
+    Portal: https://www.al.sp.gov.br/dados-abertos/
+    Arquivo: https://www.al.sp.gov.br/repositorioDados/processo_legislativo/proposituras.zip
+    Formato: ZIP contendo XML com todas as proposituras (atualizado diariamente)
+    
+    Frequência de atualização: Diária
+    Portal de dados abertos: https://www.al.sp.gov.br/dados-abertos/recurso/56
     """
-    print("⚠️ Busca na ALESP ainda não implementada")
-    return []
+    if termos is None:
+        termos = TERMOS_BUSCA
+    
+    print(f"   📥 Buscando proposituras na ALESP...")
+    # NOTA: O arquivo proposituras.zip é atualizado DIARIAMENTE no portal da ALESP.
+    # Para garantir dados atualizados, baixamos o arquivo toda vez que uma busca é feita.
+    # Isso garante que mesmo no Hugging Face Space, sempre teremos os dados mais recentes.
+    
+    # URL do arquivo ZIP
+    url_zip = "https://www.al.sp.gov.br/repositorioDados/processo_legislativo/proposituras.zip"
+    
+    pls_encontradas = []
+    
+    try:
+        # Baixar arquivo ZIP (sob demanda - sempre busca a versão mais recente)
+        print(f"   📦 Baixando arquivo proposituras.zip atualizado (última atualização do portal)...")
+        print(f"   ⏱️ Isso garante dados atualizados diariamente (pode levar 10-20 segundos)")
+        response = requests.get(url_zip, timeout=120, stream=True)
+        response.raise_for_status()
+        
+        zip_data = BytesIO(response.content)
+        
+        with zipfile.ZipFile(zip_data, 'r') as zip_ref:
+            files = zip_ref.namelist()
+            if not files:
+                print(f"   ⚠️ ZIP vazio")
+                return []
+            
+            xml_file = files[0]
+            print(f"   📄 Extraindo {xml_file}...")
+            
+            # Ler XML (pode ser grande, mas preciso parsear)
+            xml_content = zip_ref.read(xml_file)
+            print(f"   📊 XML extraído: {len(xml_content)/1024/1024:.1f}MB")
+            
+            # Parsear XML
+            root = ET.fromstring(xml_content)
+            
+            # Buscar todas as proposituras
+            proposituras = root.findall('.//propositura')
+            total_props = len(proposituras)
+            print(f"   📋 Total de proposituras no arquivo: {total_props}")
+            
+            # Filtrar proposituras
+            for propositura in proposituras:
+                if len(pls_encontradas) >= limite:
+                    break
+                
+                # Extrair campos do XML
+                ano_text = propositura.findtext('AnoLegislativo', '')
+                numero_text = propositura.findtext('NroLegislativo', '')
+                ementa = propositura.findtext('Ementa', '')
+                id_doc = propositura.findtext('IdDocumento', '')
+                data_entrada = propositura.findtext('DtEntradaSistema', '')
+                natureza_id = propositura.findtext('IdNatureza', '')
+                
+                if not ementa or len(ementa) < 10:
+                    continue
+                
+                # Filtrar por ano se especificado
+                if ano_inicio_manual is not None and ano_fim_manual is not None:
+                    try:
+                        ano_int = int(ano_text) if ano_text else 0
+                        if not (ano_inicio_manual <= ano_int <= ano_fim_manual):
+                            continue
+                    except:
+                        continue
+                
+                # Filtrar por termos LGBTQIA+
+                ementa_lower = ementa.lower()
+                
+                tem_termo_especifico = False
+                for termo in TERMOS_BUSCA_ESPECIFICOS:
+                    if termo == 'trans' and 'trans' in ementa_lower:
+                        if re.search(r'\btrans\b', ementa_lower) and (
+                            any(palavra in ementa_lower for palavra in ['gênero', 'sexual', 'identidade', 'lgbt', 'transfobia', 'transexual', 'transgênero']) or
+                            any(palavra in ementa_lower for palavra in ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 'direito', 'direitos'])
+                        ):
+                            tem_termo_especifico = True
+                            break
+                    elif termo.lower() in ementa_lower:
+                        tem_termo_especifico = True
+                        break
+                
+                palavras_legislativas = ['proíbe', 'veda', 'restringe', 'garante', 'reconhece', 'criminaliza', 
+                                        'orientação', 'identidade', 'gênero', 'sexual', 'direito', 'direitos',
+                                        'dispõe', 'altera', 'estabelece', 'define']
+                tem_termo_contextual = any(
+                    termo.lower() in ementa_lower 
+                    for termo in TERMOS_BUSCA_CONTEXTUAIS[:8]
+                ) and any(
+                    palavra in ementa_lower for palavra in palavras_legislativas
+                )
+                
+                if tem_termo_especifico or tem_termo_contextual:
+                    # Determinar sigla do tipo (pode estar em outros campos)
+                    sigla = 'PL'  # Padrão
+                    tipo_text = propositura.findtext('Sigla', '') or propositura.findtext('Tipo', '')
+                    if tipo_text:
+                        sigla = tipo_text.upper()
+                    
+                    # Link para propositura (formato comum da ALESP)
+                    link = f"https://www.al.sp.gov.br/propositura/?id={id_doc}" if id_doc else "https://www.al.sp.gov.br/"
+                    
+                    pls_encontradas.append({
+                        'Nº': f"{sigla} {numero_text}/{ano_text}" if numero_text and ano_text else f"Nº {id_doc}",
+                        'Ano': ano_text or 'N/A',
+                        'Casa': 'ALESP',
+                        'Ementa': ementa,
+                        'Autores': propositura.findtext('Autor', 'N/A'),
+                        'Data': data_entrada[:10] if data_entrada else 'N/A',  # Apenas data, sem hora
+                        'Link': link,
+                        'Status': 'N/A',
+                        'Fonte': 'ALESP'
+                    })
+        
+        print(f"   ✅ {len(pls_encontradas)} proposituras relevantes encontradas na ALESP")
+        
+        return pls_encontradas[:limite]
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"   ⚠️ Erro HTTP ao buscar na ALESP: {e.response.status_code}")
+        return []
+    except Exception as e:
+        print(f"   ⚠️ Erro ao buscar na ALESP: {str(e)[:150]}")
+        import traceback
+        print(f"   Detalhes: {traceback.format_exc()[:200]}")
+        return []
 
 def buscar_todas_fontes(
     termos: List[str] = None,

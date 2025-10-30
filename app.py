@@ -8,7 +8,7 @@ import pandas as pd
 import re
 from datetime import datetime
 from ensemble_híbrido import classificar_ensemble, carregar_modelos
-from api_radar import buscar_camara_deputados, buscar_senado_federal, filtrar_pls_relevantes
+from api_radar import buscar_camara_deputados, buscar_senado_federal, buscar_alesp, buscar_camara_sao_paulo, filtrar_pls_relevantes
 
 # Carregar modelos uma vez no início
 print("🏳️‍🌈 Carregando modelos...")
@@ -26,7 +26,8 @@ with gr.Blocks(
     # 🏳️‍🌈 Radar Legislativo LGBTQIA+
     
     Sistema de busca e análise automática de Projetos de Lei relacionados a direitos LGBTQIA+ 
-    no **Congresso Nacional** (Câmara dos Deputados e Senado Federal).
+    no **Congresso Nacional** (Câmara dos Deputados e Senado Federal), **ALESP** (Assembleia Legislativa de São Paulo) 
+    e **Câmara Municipal de São Paulo**.
     
     Utiliza **Ensemble Híbrido** (Radar Social + AzMina/QuiterIA + Keywords + Padrões) para identificar
     se PLs são **favoráveis** ou **desfavoráveis** aos direitos da comunidade LGBTQIA+.
@@ -38,13 +39,15 @@ with gr.Blocks(
     
     
     # RADAR AUTOMÁTICO - Única aba
-    with gr.Tab("🔍 Radar Automático - Congresso Nacional"):
+    with gr.Tab("🔍 Radar Automático"):
         gr.Markdown("""
-        ### 🔍 Radar Automático de PLs LGBTQIA+ - Congresso Nacional
+        ### 🔍 Radar Automático de PLs LGBTQIA+
         
         Busca e analisa automaticamente PLs relacionadas a direitos LGBTQIA+ nas APIs oficiais:
-        - **Câmara dos Deputados** ✅
-        - **Senado Federal** ✅
+        - **Câmara dos Deputados** ✅ (dados atualizados diariamente)
+        - **Senado Federal** ✅ (matérias atualizadas recentemente)
+        - **ALESP (Assembleia Legislativa de SP)** ✅ (atualizado diariamente)
+        - **Câmara Municipal de São Paulo** ✅ (dados atualizados)
         
         ⚠️ **Atenção:** A busca pode levar alguns segundos, especialmente em períodos longos.
         """)
@@ -56,6 +59,7 @@ with gr.Blocks(
                 maximum=2025,
                 value=2020,
                 step=1,
+                interactive=True,
                 info="Ano mais antigo para buscar"
             )
             
@@ -63,8 +67,9 @@ with gr.Blocks(
                 label="Ano Final",
                 minimum=2010,
                 maximum=2025,
-                value=2025,
+                value=datetime.now().year,
                 step=1,
+                interactive=True,
                 info="Ano mais recente para buscar"
             )
             
@@ -74,20 +79,32 @@ with gr.Blocks(
                 maximum=100,
                 value=50,
                 step=5,
+                interactive=True,
                 info="Número máximo de PLs encontradas"
             )
         
         with gr.Row():
             btn_buscar = gr.Button("🔍 Buscar e Analisar PLs", variant="primary", scale=2)
+        
+        with gr.Row():
             checkbox_camara = gr.Checkbox(label="Câmara dos Deputados", value=True)
             checkbox_senado = gr.Checkbox(label="Senado Federal", value=True)
+            checkbox_alesp = gr.Checkbox(
+                label="ALESP (Assembleia Legislativa SP)", 
+                value=False,
+                info="Dados atualizados diariamente"
+            )
+            checkbox_camara_sp = gr.Checkbox(label="Câmara Municipal SP", value=False)
         
         output_busca = gr.Markdown(label="📊 PLs Encontradas e Analisadas")
         
-        def buscar_e_analisar(ano_inicio, ano_fim, limite, buscar_camara, buscar_senado):
+        def buscar_e_analisar(ano_inicio, ano_fim, limite, checkbox_camara, checkbox_senado, checkbox_alesp, checkbox_camara_sp):
             """Busca PLs e analisa automaticamente"""
             import sys
             from io import StringIO
+            
+            # Debug: verificar se função está sendo chamada
+            print("🔍 Função buscar_e_analisar chamada!", flush=True)
             
             # Validar anos
             if ano_inicio > ano_fim:
@@ -96,8 +113,8 @@ with gr.Blocks(
             if ano_fim > datetime.now().year:
                 return f"❌ **Erro:** Ano final não pode ser maior que {datetime.now().year}."
             
-            if not buscar_camara and not buscar_senado:
-                return "❌ **Erro:** Selecione pelo menos uma fonte (Câmara ou Senado)."
+            if not checkbox_camara and not checkbox_senado and not checkbox_alesp and not checkbox_camara_sp:
+                return "❌ **Erro:** Selecione pelo menos uma fonte."
             
             # Capturar prints para exibir na interface
             old_stdout = sys.stdout
@@ -107,17 +124,37 @@ with gr.Blocks(
                 pls_encontradas = []
                 anos_para_buscar = list(range(int(ano_inicio), int(ano_fim) + 1))
                 
+                # Contar quantas fontes foram selecionadas para distribuir o limite
+                fontes_selecionadas = []
+                if checkbox_camara:
+                    fontes_selecionadas.append("Câmara")
+                if checkbox_senado:
+                    fontes_selecionadas.append("Senado")
+                if checkbox_alesp:
+                    fontes_selecionadas.append("ALESP")
+                if checkbox_camara_sp:
+                    fontes_selecionadas.append("Câmara Municipal SP")
+                
+                num_fontes = len(fontes_selecionadas)
+                
+                # Distribuir limite entre as fontes (cada fonte busca uma proporção do limite)
+                # Usar limite * 1.1 para garantir que distribuímos bem, mas depois limitamos o total
+                limite_por_fonte = max(5, int(int(limite) * 1.1 / num_fontes)) if num_fontes > 0 else int(limite)
+                
                 print(f"🔍 Buscando PLs LGBTQIA+ no Congresso Nacional...")
                 print(f"📅 Período: {ano_inicio} a {ano_fim} ({len(anos_para_buscar)} anos)")
+                print(f"📊 Fontes selecionadas: {', '.join(fontes_selecionadas)} ({num_fontes} fontes)")
+                print(f"📋 Distribuindo limite: até ~{limite_por_fonte} PLs por fonte (total máximo: {limite})")
                 
                 # 1. Câmara dos Deputados
-                if buscar_camara:
-                    print(f"\n📥 Buscando na Câmara dos Deputados...")
+                if checkbox_camara:
+                    print(f"\n📥 Buscando na Câmara dos Deputados (limite: ~{limite_por_fonte})...")
+                    pls_camara = []
                     for ano in reversed(anos_para_buscar):
-                        if len(pls_encontradas) >= int(limite):
+                        if len(pls_camara) >= limite_por_fonte:
                             break
                         
-                        limite_restante = int(limite) - len(pls_encontradas)
+                        limite_restante = limite_por_fonte - len(pls_camara)
                         if limite_restante <= 0:
                             break
                         
@@ -127,18 +164,22 @@ with gr.Blocks(
                             ano_inicio_manual=ano,
                             ano_fim_manual=ano
                         )
-                        pls_encontradas.extend(pls_ano)
+                        pls_camara.extend(pls_ano)
                         if pls_ano:
                             print(f"   ✅ {len(pls_ano)} PLs encontradas na Câmara em {ano}")
+                    
+                    pls_encontradas.extend(pls_camara)
+                    print(f"   📊 Total Câmara: {len(pls_camara)} PLs")
                 
                 # 2. Senado Federal
-                if buscar_senado and len(pls_encontradas) < int(limite):
-                    print(f"\n📥 Buscando no Senado Federal...")
+                if checkbox_senado:
+                    print(f"\n📥 Buscando no Senado Federal (limite: ~{limite_por_fonte})...")
+                    pls_senado = []
                     for ano in reversed(anos_para_buscar):
-                        if len(pls_encontradas) >= int(limite):
+                        if len(pls_senado) >= limite_por_fonte:
                             break
                         
-                        limite_restante = int(limite) - len(pls_encontradas)
+                        limite_restante = limite_por_fonte - len(pls_senado)
                         if limite_restante <= 0:
                             break
                         
@@ -147,9 +188,46 @@ with gr.Blocks(
                             ano_inicio_manual=ano,
                             ano_fim_manual=ano
                         )
-                        pls_encontradas.extend(pls_ano)
+                        pls_senado.extend(pls_ano)
                         if pls_ano:
                             print(f"   ✅ {len(pls_ano)} PLs encontradas no Senado em {ano}")
+                    
+                    pls_encontradas.extend(pls_senado)
+                    print(f"   📊 Total Senado: {len(pls_senado)} PLs")
+                
+                # 3. ALESP (Assembleia Legislativa de São Paulo)
+                if checkbox_alesp:
+                    print(f"\n📥 Buscando na ALESP (limite: ~{limite_por_fonte})...")
+                    pls_alesp = buscar_alesp(
+                        limite=limite_por_fonte,
+                        ano_inicio_manual=int(ano_inicio),
+                        ano_fim_manual=int(ano_fim)
+                    )
+                    pls_encontradas.extend(pls_alesp)
+                    if pls_alesp:
+                        print(f"   ✅ {len(pls_alesp)} PLs encontradas na ALESP")
+                    else:
+                        print(f"   ℹ️ Nenhuma PL relevante encontrada na ALESP")
+                
+                # 4. Câmara Municipal de São Paulo
+                if checkbox_camara_sp:
+                    print(f"\n📥 Buscando na Câmara Municipal de SP (limite: ~{limite_por_fonte})...")
+                    pls_camara_sp = buscar_camara_sao_paulo(
+                        limite=limite_por_fonte,
+                        ano_inicio_manual=int(ano_inicio),
+                        ano_fim_manual=int(ano_fim)
+                    )
+                    pls_encontradas.extend(pls_camara_sp)
+                    if pls_camara_sp:
+                        print(f"   ✅ {len(pls_camara_sp)} PLs encontradas na Câmara Municipal SP")
+                    else:
+                        print(f"   ℹ️ Nenhuma PL relevante encontrada na Câmara Municipal SP")
+                
+                # Limitar o total final ao limite solicitado (caso tenha ultrapassado)
+                if len(pls_encontradas) > int(limite):
+                    print(f"\n📊 Total encontrado: {len(pls_encontradas)} PLs")
+                    print(f"   ⚙️ Limitando a {limite} PLs (mantendo diversidade de fontes)...")
+                    pls_encontradas = pls_encontradas[:int(limite)]
                 
                 # Restaurar stdout
                 sys.stdout = old_stdout
@@ -157,10 +235,14 @@ with gr.Blocks(
                 
                 if not pls_encontradas:
                     fontes = []
-                    if buscar_camara:
+                    if checkbox_camara:
                         fontes.append("Câmara dos Deputados")
-                    if buscar_senado:
+                    if checkbox_senado:
                         fontes.append("Senado Federal")
+                    if checkbox_alesp:
+                        fontes.append("ALESP")
+                    if checkbox_camara_sp:
+                        fontes.append("Câmara Municipal SP")
                     fontes_str = " e ".join(fontes)
                     
                     return f"""⚠️ Nenhuma PL encontrada em {fontes_str} para o período {int(ano_inicio)}-{int(ano_fim)}.
@@ -236,10 +318,14 @@ with gr.Blocks(
                 revisao = sum(1 for r in resultados if r['Classificação'] == 'REVISÃO')
                 
                 fontes_usadas = []
-                if buscar_camara:
+                if checkbox_camara:
                     fontes_usadas.append("Câmara")
-                if buscar_senado:
+                if checkbox_senado:
                     fontes_usadas.append("Senado")
+                if checkbox_alesp:
+                    fontes_usadas.append("ALESP")
+                if checkbox_camara_sp:
+                    fontes_usadas.append("Câmara Municipal SP")
                 
                 relatorio = f"""## 🔍 Radar de PLs LGBTQIA+ - Resultados
 
@@ -284,7 +370,7 @@ with gr.Blocks(
         
         btn_buscar.click(
             fn=buscar_e_analisar,
-            inputs=[ano_inicio, ano_fim, limite_resultados, checkbox_camara, checkbox_senado],
+            inputs=[ano_inicio, ano_fim, limite_resultados, checkbox_camara, checkbox_senado, checkbox_alesp, checkbox_camara_sp],
             outputs=output_busca
         )
         
@@ -307,11 +393,13 @@ with gr.Blocks(
         - **Período médio (3-5 anos):** Balanceado, mais resultados
         - **Período grande (2010-2025):** Pode levar alguns minutos, muitos resultados
         
-        ### ⚠️ Limitações:
-        - A busca pode levar alguns segundos (até minutos para períodos longos)
-        - A API da Câmara permite até 100 itens por página (buscamos múltiplas páginas)
-        - A API do Senado ainda está em desenvolvimento básico
-        - Depende da disponibilidade das APIs públicas
+                ### ⚠️ Limitações e Avisos:
+                - A busca pode levar alguns segundos (até minutos para períodos longos)
+                - **Câmara dos Deputados**: API permite até 100 itens por página (buscamos múltiplas páginas)
+                - **Senado Federal**: Busca todas as matérias apresentadas no ano via `/materia/pesquisa/lista` ✅
+                - **ALESP**: Baixa arquivo ZIP completo (~16MB) toda vez, garantindo dados atualizados. Pode levar 10-20 segundos. Atualizado diariamente.
+                - **Câmara Municipal SP**: Busca todos os projetos do ano (pode ter 20k+), filtra localmente
+                - Depende da disponibilidade das APIs públicas
         """)
     
     gr.Markdown("""
