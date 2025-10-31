@@ -33,6 +33,7 @@ with gr.Blocks(
     se PLs são **favoráveis** ou **desfavoráveis** aos direitos da comunidade LGBTQIA+.
     
     ## ⚠️ Aviso Importante
+    - Acesse pelo computador e não pelo celular (interface em desenvolvimento)
     - Requer **revisão humana** para decisões finais
     - Use como **ferramenta de apoio**, não como decisão automática
     """)
