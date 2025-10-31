@@ -1,5 +1,6 @@
 ---
-title: Radar Legislativo LGBTQIA+ 🏳️‍🌈⚖️📡
+title: Radar Legislativo LGBTQIA+🏳️‍🌈
+emoji: 📡
 colorFrom: purple
 colorTo: pink
 sdk: gradio
