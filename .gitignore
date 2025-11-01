@@ -12,3 +12,57 @@ venv/
 dist/
 build/
 
+# Cursor/VSCode
+*.code-workspace
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+
+# Scripts de desenvolvimento (avaliar caso a caso)
+create_space.py
+test_token.py
+
+# Arquivos de debug/build
+FORCE_REBUILD*.txt
+STATUS_*.txt
+TIMESTAMP_*.txt
+config.txt
+force_rebuild*.txt
+rebuild_config.txt
+
+# Dados locais (não commitados)
+data/local/
+*.local.csv
+
