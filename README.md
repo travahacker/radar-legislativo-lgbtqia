@@ -6,7 +6,7 @@ colorTo: pink
 sdk: gradio
 sdk_version: 4.44.0
 app_file: app.py
-pinned: false
+pinned: true
 license: cc-by-nc-sa-4.0
 short_description: Busca e análise (IA) de PLs LGBTQIA+ no Congresso e em SP
 tags:
