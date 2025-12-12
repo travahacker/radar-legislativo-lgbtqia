@@ -10,11 +10,44 @@ from datetime import datetime
 from ensemble_híbrido import classificar_ensemble, carregar_modelos
 from api_radar import buscar_camara_deputados, buscar_senado_federal, buscar_alesp, buscar_camara_sao_paulo, filtrar_pls_relevantes
 
+# Import para ZeroGPU (disponível apenas no Hugging Face Spaces)
+try:
+    from spaces import GPU
+except ImportError:
+    # Fallback para ambiente local - criar decorator dummy
+    def GPU(func):
+        return func
+
+# Variáveis globais para armazenar modelos
+radar_model = None
+azmina_model = None
+
+# Função para ZeroGPU - carrega modelos na GPU sob demanda
+@GPU
+def load_models_on_gpu():
+    """Carrega os modelos na GPU quando ZeroGPU estiver disponível."""
+    global radar_model, azmina_model
+    print("🏳️‍🌈 Carregando modelos com GPU...")
+    radar_model, azmina_model = carregar_modelos()
+    if radar_model is None:
+        print("⚠️ Aviso: Radar Social não carregado. Algumas funcionalidades podem não funcionar.")
+    return radar_model, azmina_model
+
 # Carregar modelos uma vez no início
 print("🏳️‍🌈 Carregando modelos...")
-radar_model, azmina_model = carregar_modelos()
-if radar_model is None:
-    print("⚠️ Aviso: Radar Social não carregado. Algumas funcionalidades podem não funcionar.")
+try:
+    # Tentar carregar com GPU primeiro (ZeroGPU)
+    # O decorator @GPU fará com que seja chamado automaticamente quando GPU disponível
+    load_models_on_gpu()
+    if radar_model is None:
+        # Se não foi carregado (sem GPU), carregar normalmente
+        radar_model, azmina_model = carregar_modelos()
+except Exception as e:
+    print(f"⚠️ GPU não disponível, usando CPU: {e}")
+    if radar_model is None:
+        radar_model, azmina_model = carregar_modelos()
+        if radar_model is None:
+            print("⚠️ Aviso: Radar Social não carregado. Algumas funcionalidades podem não funcionar.")
 
 # Interface Gradio - Modo Radar
 with gr.Blocks(
