@@ -10,7 +10,7 @@ from typing import Dict, Tuple, List
 import pandas as pd
 
 # Modelos
-MODEL_RADAR = "Veronyka/radar-social-lgbtqia-v2.1"
+MODEL_RADAR = "Veronyka/tybyria-v2.1"  # TybyrIA v2.1
 MODEL_AZMINA = "azmina/ia-feminista-bert-posicao"
 
 # Keywords (expandido baseado em análise dos resultados)

@@ -62,7 +62,7 @@ with gr.Blocks(
     no **Congresso Nacional** (Câmara dos Deputados e Senado Federal), **ALESP** (Assembleia Legislativa de São Paulo) 
     e **Câmara Municipal de São Paulo**.
     
-    Utiliza **Ensemble Híbrido** (Radar Social + AzMina/QuiterIA + Keywords + Padrões) para identificar
+    Utiliza **Ensemble Híbrido** (TybyrIA v2 + AzMina/QuiterIA + Keywords + Padrões) para identificar
     se PLs são **favoráveis** ou **desfavoráveis** aos direitos da comunidade LGBTQIA+.
     
     ## ⚠️ Aviso Importante
@@ -440,9 +440,9 @@ with gr.Blocks(
     ---
     
     ### 📚 Sobre
-    - **Sistema:** Ensemble Híbrido (Radar Social + AzMina/QuiterIA + Keywords + Padrões)
+    - **Sistema:** Ensemble Híbrido (TybyrIA v2 + AzMina/QuiterIA + Keywords + Padrões)
     - **Modelos:** 
-      - Radar Social LGBTQIA+ V2.1 por [Veronyka](https://huggingface.co/Veronyka/radar-social-lgbtqia-v2.1)
+      - TybyrIA v2 (Radar Social) por [Veronyka](https://huggingface.co/Veronyka/tybyria-v2.1)
       - IA Feminista AzMina/QuiterIA por [AzMina](https://huggingface.co/azmina/ia-feminista-bert-posicao)
     - **Dataset base:** 39 PLs anotadas manualmente
     

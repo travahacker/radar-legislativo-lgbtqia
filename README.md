@@ -25,7 +25,7 @@ Sistema de busca e análise automática de Projetos de Lei relacionados a direit
 ## 📋 Sobre
 
 Este sistema utiliza um **Ensemble Híbrido** que combina:
-- **Radar Social LGBTQIA+ V2.1**: Modelo de detecção de discurso de ódio (98.44% recall)
+- **TybyrIA v2** (Radar Social): Modelo de detecção de discurso de ódio (98.44% recall)
 - **AzMina/QuiterIA**: Modelo de análise feminista de PLs
 - **Keywords**: Palavras-chave específicas LGBTQIA+
 - **Padrões Legislativos**: Heurísticas para identificar estruturas restritivas
@@ -61,10 +61,11 @@ O sistema:
 
 ## 📊 Modelos Utilizados
 
-- **Radar Social LGBTQIA+ V2.1** por [Veronyka](https://huggingface.co/Veronyka/radar-social-lgbtqia-v2.1)
+- **TybyrIA v2** (Radar Social) por [Veronyka](https://huggingface.co/Veronyka/tybyria-v2.1)
   - 98.44% de recall na detecção de hate speech
   - Threshold: 0.30
   - Treinado com 1.891 comentários anotados manualmente
+  - Base: Tupi-BERT-Base (FpOliveira/tupi-bert-base-portuguese-cased)
   
 - **IA Feminista AzMina** por [AzMina](https://huggingface.co/azmina/ia-feminista-bert-posicao)
   - Análise de PLs sob perspectiva feminista
